@@ -14,7 +14,7 @@ import {
   ArrowUpDown
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:4000';
+const API_BASE = '';
 
 // Utilidad para convertir números romanos a enteros (soporta hasta el 100)
 function romanToInt(str) {

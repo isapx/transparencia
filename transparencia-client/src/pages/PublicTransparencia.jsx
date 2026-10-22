@@ -13,7 +13,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:4000';
+const API_BASE = '';
 
 function romanToInt(str) {
   if (!str) return 0;
