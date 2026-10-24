@@ -6,10 +6,10 @@ services:
     container_name: mysql_transparencia
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: Perroloco48$
-      MYSQL_DATABASE: transparencia_etchojoa
-      MYSQL_USER: transparencia_user
-      MYSQL_PASSWORD: Computadora358&&
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Define MYSQL_ROOT_PASSWORD in the root .env file}
+      MYSQL_DATABASE: ${DB_NAME:?Define DB_NAME in the root .env file}
+      MYSQL_USER: ${DB_USER:?Define DB_USER in the root .env file}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Define DB_PASSWORD in the root .env file}
     ports:
       - "3306:3306"
     volumes:
