@@ -16,6 +16,10 @@ import {
 
 const API_BASE = '';
 
+function isExternalDocumentUrl(value) {
+  return /^https?:\/\//i.test(value || '');
+}
+
 // Utilidad para convertir números romanos a enteros (soporta hasta el 100)
 function romanToInt(str) {
   if (!str) return 0;
@@ -55,7 +59,13 @@ export default function AdminPanel() {
   const [newYear, setNewYear] = useState('');
   const [newArticle, setNewArticle] = useState({ number: '', name: '' });
   const [newFraction, setNewFraction] = useState({ code: '', name: '' });
-  const [docUpload, setDocUpload] = useState({ title: '', period: '1er Trimestre', file: null });
+  const [docUpload, setDocUpload] = useState({
+    title: '',
+    period: '1er Trimestre',
+    sourceType: 'file',
+    file: null,
+    url: ''
+  });
 
   // Estados de Edición Inline
   const [editingYear, setEditingYear] = useState(null);
@@ -281,13 +291,19 @@ export default function AdminPanel() {
   // ===================== CRUD DOCUMENTOS =====================
   const handleUploadDocument = async (e) => {
     e.preventDefault();
-    if (!docUpload.file || !selectedFractionId) return;
+    if (!selectedFractionId) return;
+    if (docUpload.sourceType === 'file' && !docUpload.file) return;
+    if (docUpload.sourceType === 'url' && !isExternalDocumentUrl(docUpload.url)) return;
 
     const formData = new FormData();
     formData.append('fractionId', selectedFractionId);
     formData.append('title', docUpload.title);
     formData.append('period', docUpload.period);
-    formData.append('file', docUpload.file);
+    if (docUpload.sourceType === 'file') {
+      formData.append('file', docUpload.file);
+    } else {
+      formData.append('url', docUpload.url);
+    }
 
     const res = await fetch(`${API_BASE}/api/documents`, {
       method: 'POST',
@@ -298,7 +314,10 @@ export default function AdminPanel() {
     if (res.ok) {
       const added = await res.json();
       setDocuments([...documents, added]);
-      setDocUpload({ title: '', period: '1er Trimestre', file: null });
+      setDocUpload({ title: '', period: '1er Trimestre', sourceType: 'file', file: null, url: '' });
+    } else {
+      const error = await res.json();
+      alert(error.error || 'No se pudo guardar el documento.');
     }
   };
 
@@ -611,6 +630,20 @@ export default function AdminPanel() {
               onChange={e => setDocUpload({ ...docUpload, title: e.target.value })} 
               className="text-sm border rounded px-3 py-1.5 outline-none focus:ring-1 focus:ring-blue-500 flex-grow md:flex-grow-0 md:w-80" 
             />
+            <select
+              value={docUpload.sourceType}
+              onChange={e => setDocUpload({
+                ...docUpload,
+                sourceType: e.target.value,
+                file: null,
+                url: ''
+              })}
+              className="text-sm border rounded px-3 py-1.5 bg-white outline-none"
+              aria-label="Tipo de documento"
+            >
+              <option value="file">Subir archivo</option>
+              <option value="url">Pegar URL</option>
+            </select>
             <select 
               value={docUpload.period} 
               onChange={e => setDocUpload({ ...docUpload, period: e.target.value })} 
@@ -622,18 +655,32 @@ export default function AdminPanel() {
               <option>3er Trimestre</option>
               <option>4to Trimestre</option>
             </select>
-            <input 
-              type="file" 
-              required 
-              onChange={e => setDocUpload({ ...docUpload, file: e.target.files[0] })} 
-              className="text-sm file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" 
-            />
-            <button 
-              type="submit" 
-              disabled={!selectedFractionId} 
+            {docUpload.sourceType === 'file' ? (
+              <input
+                type="file"
+                required
+                onChange={e => setDocUpload({ ...docUpload, file: e.target.files[0] })}
+                className="text-sm file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+              />
+            ) : (
+              <input
+                type="url"
+                required
+                pattern="https?://.+"
+                title="Ingresa una URL que comience con http:// o https://"
+                placeholder="https://..."
+                value={docUpload.url}
+                onChange={e => setDocUpload({ ...docUpload, url: e.target.value })}
+                className="text-sm border rounded px-3 py-1.5 outline-none focus:ring-1 focus:ring-blue-500 flex-grow md:flex-grow-0 md:w-80"
+              />
+            )}
+            <button
+              type="submit"
+              disabled={!selectedFractionId || (docUpload.sourceType === 'file' && !docUpload.file)}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
             >
-              <FileUp className="w-4 h-4"/> Subir Archivo
+              {docUpload.sourceType === 'file' ? <FileUp className="w-4 h-4" /> : <ExternalLink className="w-4 h-4" />}
+              {docUpload.sourceType === 'file' ? 'Subir Archivo' : 'Guardar URL'}
             </button>
           </form>
 
@@ -667,9 +714,9 @@ export default function AdminPanel() {
                       </td>
                       <td className="py-2.5 px-3 text-right space-x-2">
                         <a
-                          href={`${API_BASE}${d.file_path}`}
+                          href={isExternalDocumentUrl(d.file_path) ? d.file_path : `${API_BASE}${d.file_path}`}
                           target="_blank"
-                          rel="noreferrer"
+                          rel="noopener noreferrer"
                           className="text-slate-400 hover:text-blue-600 p-1 inline-block"
                         >
                           <ExternalLink className="w-4 h-4" />

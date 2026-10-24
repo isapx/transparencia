@@ -163,18 +163,43 @@ app.get('/api/documents/:fractionId', async (req, res) => {
 app.post('/api/documents', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     const { fractionId, title, period } = req.body;
-    const filePath = req.file ? `/uploads/${req.file.filename}` : '';
+    const url = typeof req.body.url === 'string' ? req.body.url.trim() : '';
+    let filePath;
+
+    if (!/^\d+$/.test(fractionId || '') || !title?.trim() || !period?.trim()) {
+      return res.status(400).json({ error: 'La fracción, el título y el periodo son obligatorios.' });
+    }
+
+    if (req.file && url) {
+      return res.status(400).json({ error: 'Selecciona un archivo o una URL, no ambos.' });
+    }
+
+    if (req.file) {
+      filePath = `/uploads/${req.file.filename}`;
+    } else if (url) {
+      try {
+        const parsedUrl = new URL(url);
+        if (!['http:', 'https:'].includes(parsedUrl.protocol) || url.length > 500) {
+          throw new Error('Invalid document URL');
+        }
+      } catch {
+        return res.status(400).json({ error: 'Ingresa una URL válida que comience con http:// o https://.' });
+      }
+      filePath = url;
+    } else {
+      return res.status(400).json({ error: 'Debes subir un archivo o ingresar una URL.' });
+    }
 
     const [result] = await pool.query(
       'INSERT INTO documents (fraction_id, title, period, file_path) VALUES (?, ?, ?, ?)',
-      [fractionId, title, period, filePath]
+      [fractionId, title.trim(), period.trim(), filePath]
     );
 
     res.json({
       id: result.insertId,
       fractionId,
-      title,
-      period,
+      title: title.trim(),
+      period: period.trim(),
       file_path: filePath,
       created_at: new Date().toISOString()
     });
@@ -187,7 +212,7 @@ app.post('/api/documents', authenticateToken, upload.single('file'), async (req,
 app.delete('/api/documents/:id', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT file_path FROM documents WHERE id = ?', [req.params.id]);
-    if (rows.length > 0 && rows[0].file_path) {
+    if (rows.length > 0 && rows[0].file_path && !/^https?:\/\//i.test(rows[0].file_path)) {
       const full = path.join(__dirname, rows[0].file_path);
       if (fs.existsSync(full)) fs.unlinkSync(full);
     }
