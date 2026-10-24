@@ -7,7 +7,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { fileURLToPath } from 'url';
 import { pool } from './db.js';
-import { authenticateToken } from './authMiddleware.js';
+import { authenticateToken, requireRole } from './authMiddleware.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,31 +31,138 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+function removeUploadedFile(file) {
+  if (!file) return;
+  fs.unlink(file.path, error => {
+    if (error && error.code !== 'ENOENT') {
+      console.error('Error al limpiar archivo cargado:', error.message);
+    }
+  });
+}
+
+function isValidDocumentUrl(value) {
+  if (typeof value !== 'string' || value.length > 500) return false;
+  try {
+    const parsedUrl = new URL(value);
+    return ['http:', 'https:'].includes(parsedUrl.protocol);
+  } catch {
+    return false;
+  }
+}
+
 // ==========================================
 // AUTENTICACIÓN
 // ==========================================
 app.post('/api/auth/register', async (req, res) => {
-  const { username, password } = req.body;
+  const username = typeof req.body.username === 'string' ? req.body.username.trim() : '';
+  const fullName = typeof req.body.fullName === 'string' ? req.body.fullName.trim() : '';
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const { password } = req.body;
+  if (!username || !fullName || !email || typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'Completa todos los campos y usa una contraseña de al menos 8 caracteres.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
+  }
+
+  let connection;
   try {
+    connection = await pool.getConnection();
+    await connection.query('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+    await connection.beginTransaction();
+    const [existingUsers] = await connection.query('SELECT id FROM users FOR UPDATE');
+    if (existingUsers.length > 0) {
+      await connection.rollback();
+      return res.status(403).json({ error: 'El registro inicial ya fue realizado.' });
+    }
+
     const hash = await bcrypt.hash(password, 10);
-    const [result] = await pool.query('INSERT INTO users (username, password) VALUES (?, ?)', [username, hash]);
+    const [result] = await connection.query(
+      'INSERT INTO users (username, full_name, email, password, role) VALUES (?, ?, ?, ?, ?)',
+      [username, fullName, email, hash, 'admin']
+    );
+    await connection.commit();
     res.json({ message: 'Usuario registrado', userId: result.insertId });
   } catch (e) {
+    if (connection) await connection.rollback();
+    if (e.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'El usuario o correo electrónico ya está registrado.' });
+    }
     console.error('Error al registrar usuario:', e.message);
-    res.status(400).json({ error: 'Error al registrar o el usuario ya existe' });
+    res.status(500).json({ error: 'Error al registrar el usuario inicial.' });
+  } finally {
+    connection?.release();
+  }
+});
+
+app.get('/api/users', authenticateToken, requireRole('admin'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT id, username, full_name, email, role, created_at FROM users ORDER BY username'
+    );
+    res.json(rows);
+  } catch (e) {
+    console.error('Error al listar usuarios:', e.message);
+    res.status(500).json({ error: 'Error al obtener usuarios' });
+  }
+});
+
+app.post('/api/users', authenticateToken, requireRole('admin'), async (req, res) => {
+  const username = typeof req.body.username === 'string' ? req.body.username.trim() : '';
+  const fullName = typeof req.body.fullName === 'string' ? req.body.fullName.trim() : '';
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const { password, role } = req.body;
+
+  if (!username || !fullName || !email || typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'Completa todos los campos y usa una contraseña de al menos 8 caracteres.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
+  }
+  if (!['admin', 'usuario'].includes(role)) {
+    return res.status(400).json({ error: 'Selecciona un perfil válido.' });
+  }
+
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const [result] = await pool.query(
+      'INSERT INTO users (username, full_name, email, password, role) VALUES (?, ?, ?, ?, ?)',
+      [username, fullName, email, hash, role]
+    );
+    res.status(201).json({
+      id: result.insertId,
+      username,
+      full_name: fullName,
+      email,
+      role,
+      created_at: new Date().toISOString()
+    });
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'El nombre de usuario o correo electrónico ya está registrado.' });
+    }
+    console.error('Error al crear usuario:', e.message);
+    res.status(500).json({ error: 'Error al crear el usuario.' });
   }
 });
 
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
+    const [rows] = await pool.query(
+      'SELECT id, username, full_name, email, password, role FROM users WHERE username = ?',
+      [username]
+    );
     if (rows.length === 0) return res.status(401).json({ error: 'Credenciales inválidas' });
     const match = await bcrypt.compare(password, rows[0].password);
     if (!match) return res.status(401).json({ error: 'Credenciales inválidas' });
     
-    const token = jwt.sign({ id: rows[0].id, username }, process.env.JWT_SECRET, { expiresIn: '8h' });
-    res.json({ token, username });
+    const { id, role, full_name: fullName, email } = rows[0];
+    const token = jwt.sign({ id, username: rows[0].username }, process.env.JWT_SECRET, { expiresIn: '8h' });
+    res.json({
+      token,
+      user: { id, username: rows[0].username, fullName, email, role }
+    });
   } catch (e) {
     console.error('Error en login:', e.message);
     res.status(500).json({ error: 'Error interno en el servidor' });
@@ -167,22 +274,19 @@ app.post('/api/documents', authenticateToken, upload.single('file'), async (req,
     let filePath;
 
     if (!/^\d+$/.test(fractionId || '') || !title?.trim() || !period?.trim()) {
+      removeUploadedFile(req.file);
       return res.status(400).json({ error: 'La fracción, el título y el periodo son obligatorios.' });
     }
 
     if (req.file && url) {
+      removeUploadedFile(req.file);
       return res.status(400).json({ error: 'Selecciona un archivo o una URL, no ambos.' });
     }
 
     if (req.file) {
       filePath = `/uploads/${req.file.filename}`;
     } else if (url) {
-      try {
-        const parsedUrl = new URL(url);
-        if (!['http:', 'https:'].includes(parsedUrl.protocol) || url.length > 500) {
-          throw new Error('Invalid document URL');
-        }
-      } catch {
+      if (!isValidDocumentUrl(url)) {
         return res.status(400).json({ error: 'Ingresa una URL válida que comience con http:// o https://.' });
       }
       filePath = url;
@@ -204,12 +308,69 @@ app.post('/api/documents', authenticateToken, upload.single('file'), async (req,
       created_at: new Date().toISOString()
     });
   } catch (e) {
+    removeUploadedFile(req.file);
     console.error('Error al subir documento:', e.message);
     res.status(500).json({ error: 'Error al registrar el documento' });
   }
 });
 
-app.delete('/api/documents/:id', authenticateToken, async (req, res) => {
+app.put('/api/documents/:id', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
+    const period = typeof req.body.period === 'string' ? req.body.period.trim() : '';
+    const sourceType = req.body.sourceType;
+    const url = typeof req.body.url === 'string' ? req.body.url.trim() : '';
+    if (!title || !period || !['file', 'url'].includes(sourceType)) {
+      removeUploadedFile(req.file);
+      return res.status(400).json({ error: 'Completa el título, el periodo y el tipo de documento.' });
+    }
+
+    const [rows] = await pool.query('SELECT file_path FROM documents WHERE id = ?', [req.params.id]);
+    if (rows.length === 0) {
+      removeUploadedFile(req.file);
+      return res.status(404).json({ error: 'El documento no existe.' });
+    }
+
+    const previousPath = rows[0].file_path;
+    let filePath;
+    if (sourceType === 'url') {
+      if (req.file || !isValidDocumentUrl(url)) {
+        removeUploadedFile(req.file);
+        return res.status(400).json({ error: 'Ingresa una URL válida que comience con http:// o https://.' });
+      }
+      filePath = url;
+    } else if (req.file) {
+      filePath = `/uploads/${req.file.filename}`;
+    } else if (/^https?:\/\//i.test(previousPath)) {
+      return res.status(400).json({ error: 'Selecciona el archivo que quieres asociar al documento.' });
+    } else {
+      filePath = previousPath;
+    }
+
+    await pool.query(
+      'UPDATE documents SET title = ?, period = ?, file_path = ? WHERE id = ?',
+      [title, period, filePath, req.params.id]
+    );
+
+    if (filePath !== previousPath && previousPath.startsWith('/uploads/')) {
+      const oldFile = path.join(uploadPath, path.basename(previousPath));
+      if (fs.existsSync(oldFile)) removeUploadedFile({ path: oldFile });
+    }
+
+    res.json({
+      id: Number(req.params.id),
+      title,
+      period,
+      file_path: filePath
+    });
+  } catch (e) {
+    removeUploadedFile(req.file);
+    console.error('Error al actualizar documento:', e.message);
+    res.status(500).json({ error: 'Error al actualizar el documento.' });
+  }
+});
+
+app.delete('/api/documents/:id', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT file_path FROM documents WHERE id = ?', [req.params.id]);
     if (rows.length > 0 && rows[0].file_path && !/^https?:\/\//i.test(rows[0].file_path)) {
@@ -240,7 +401,7 @@ app.put('/api/years/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.delete('/api/years/:id', authenticateToken, async (req, res) => {
+app.delete('/api/years/:id', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     // Opcional: borrar archivos físicos antes de eliminar en cascada
     await pool.query('DELETE FROM years WHERE id = ?', [req.params.id]);
@@ -266,7 +427,7 @@ app.put('/api/articles/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.delete('/api/articles/:id', authenticateToken, async (req, res) => {
+app.delete('/api/articles/:id', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     await pool.query('DELETE FROM articles WHERE id = ?', [req.params.id]);
     res.json({ success: true });
@@ -291,7 +452,7 @@ app.put('/api/fractions/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.delete('/api/fractions/:id', authenticateToken, async (req, res) => {
+app.delete('/api/fractions/:id', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     await pool.query('DELETE FROM fractions WHERE id = ?', [req.params.id]);
     res.json({ success: true });
@@ -300,5 +461,40 @@ app.delete('/api/fractions/:id', authenticateToken, async (req, res) => {
   }
 });
 
+async function ensureUserProfileSchema() {
+  const [columns] = await pool.query(
+    `SELECT COLUMN_NAME
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'users'
+       AND COLUMN_NAME IN ('full_name', 'email')`
+  );
+  const existingColumns = new Set(columns.map(column => column.COLUMN_NAME));
+  if (!existingColumns.has('full_name')) {
+    await pool.query('ALTER TABLE users ADD COLUMN full_name VARCHAR(255) NULL');
+  }
+  if (!existingColumns.has('email')) {
+    await pool.query('ALTER TABLE users ADD COLUMN email VARCHAR(255) NULL');
+  }
+
+  const [indexes] = await pool.query(
+    `SELECT INDEX_NAME
+     FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'users'
+       AND COLUMN_NAME = 'email'
+       AND NON_UNIQUE = 0`
+  );
+  if (indexes.length === 0) {
+    await pool.query('CREATE UNIQUE INDEX users_email_unique ON users (email)');
+  }
+}
+
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`API lista en http://localhost:${PORT}`));
+ensureUserProfileSchema()
+  .then(() => app.listen(PORT, () => console.log(`API lista en http://localhost:${PORT}`)))
+  .catch(async error => {
+    console.error('Error al preparar la base de datos de usuarios:', error.message);
+    await pool.end();
+    process.exitCode = 1;
+  });

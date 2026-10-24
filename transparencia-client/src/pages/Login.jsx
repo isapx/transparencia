@@ -25,7 +25,7 @@ export default function Login() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Credenciales inválidas');
 
-      login(data.token, data.username);
+      login(data.token, data.user);
       navigate('/admin');
     } catch (err) {
       setError(err.message);

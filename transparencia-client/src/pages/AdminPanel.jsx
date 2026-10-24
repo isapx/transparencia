@@ -11,7 +11,8 @@ import {
   Check, 
   X, 
   ExternalLink,
-  ArrowUpDown
+  ArrowUpDown,
+  UserPlus
 } from 'lucide-react';
 
 const API_BASE = '';
@@ -44,11 +45,14 @@ function romanToInt(str) {
 }
 
 export default function AdminPanel() {
-  const { token, logout } = useAuth();
+  const { token, logout, user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [years, setYears] = useState([]);
   const [articles, setArticles] = useState([]);
   const [fractions, setFractions] = useState([]);
   const [documents, setDocuments] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [userError, setUserError] = useState('');
 
   // Selecciones activas
   const [selectedYearId, setSelectedYearId] = useState('');
@@ -60,6 +64,21 @@ export default function AdminPanel() {
   const [newArticle, setNewArticle] = useState({ number: '', name: '' });
   const [newFraction, setNewFraction] = useState({ code: '', name: '' });
   const [docUpload, setDocUpload] = useState({
+    title: '',
+    period: '1er Trimestre',
+    sourceType: 'file',
+    file: null,
+    url: ''
+  });
+  const [newUser, setNewUser] = useState({
+    username: '',
+    fullName: '',
+    password: '',
+    email: '',
+    role: 'usuario'
+  });
+  const [editingDocumentId, setEditingDocumentId] = useState(null);
+  const [documentEdit, setDocumentEdit] = useState({
     title: '',
     period: '1er Trimestre',
     sourceType: 'file',
@@ -80,6 +99,17 @@ export default function AdminPanel() {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`
   };
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetch(`${API_BASE}/api/users`, { headers })
+      .then(async res => {
+        if (!res.ok) throw new Error('No se pudieron cargar los usuarios.');
+        return res.json();
+      })
+      .then(setUsers)
+      .catch(err => setUserError(err.message));
+  }, [isAdmin, token]);
 
   // Carga inicial de Años
   useEffect(() => {
@@ -327,6 +357,58 @@ export default function AdminPanel() {
     if (res.ok) setDocuments(documents.filter(d => d.id !== id));
   };
 
+  const handleUpdateDocument = async (e, document) => {
+    e.preventDefault();
+    if (documentEdit.sourceType === 'url' && !isExternalDocumentUrl(documentEdit.url)) return;
+    if (
+      documentEdit.sourceType === 'file' &&
+      isExternalDocumentUrl(document.file_path) &&
+      !documentEdit.file
+    ) return;
+
+    const formData = new FormData();
+    formData.append('title', documentEdit.title);
+    formData.append('period', documentEdit.period);
+    formData.append('sourceType', documentEdit.sourceType);
+    if (documentEdit.sourceType === 'url') {
+      formData.append('url', documentEdit.url);
+    } else if (documentEdit.file) {
+      formData.append('file', documentEdit.file);
+    }
+
+    const res = await fetch(`${API_BASE}/api/documents/${document.id}`, {
+      method: 'PUT',
+      headers: { 'Authorization': headers.Authorization },
+      body: formData
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setDocuments(documents.map(item => item.id === document.id ? { ...item, ...updated } : item));
+      setEditingDocumentId(null);
+    } else {
+      const error = await res.json();
+      alert(error.error || 'No se pudo actualizar el documento.');
+    }
+  };
+
+  const handleCreateUser = async (e) => {
+    e.preventDefault();
+    setUserError('');
+    const res = await fetch(`${API_BASE}/api/users`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(newUser)
+    });
+    if (res.ok) {
+      const createdUser = await res.json();
+      setUsers([...users, createdUser].sort((a, b) => a.username.localeCompare(b.username)));
+      setNewUser({ username: '', fullName: '', password: '', email: '', role: 'usuario' });
+    } else {
+      const error = await res.json();
+      setUserError(error.error || 'No se pudo crear el usuario.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
       {/* Header Administrativo */}
@@ -342,12 +424,17 @@ export default function AdminPanel() {
             <ExternalLink className="w-3.5 h-3.5" /> Ver Vista Pública
           </a>
         </div>
-        <button
-          onClick={logout}
-          className="flex items-center gap-1.5 text-xs bg-rose-600 hover:bg-rose-700 px-3 py-1.5 rounded font-semibold transition shadow-xs"
-        >
-          <LogOut className="w-3.5 h-3.5" /> Salir
-        </button>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-300">
+            {user?.fullName || user?.username} · {isAdmin ? 'Administrador' : 'Usuario'}
+          </span>
+          <button
+            onClick={logout}
+            className="flex items-center gap-1.5 text-xs bg-rose-600 hover:bg-rose-700 px-3 py-1.5 rounded font-semibold transition shadow-xs"
+          >
+            <LogOut className="w-3.5 h-3.5" /> Salir
+          </button>
+        </div>
       </header>
 
       <main className="max-w-7xl mx-auto p-6 space-y-6">
@@ -389,9 +476,11 @@ export default function AdminPanel() {
                           <button onClick={() => setEditingYear({ id: y.id, year: y.year })} className="text-slate-400 hover:text-indigo-600 p-1">
                             <Edit2 className="w-3.5 h-3.5"/>
                           </button>
-                          <button onClick={(e) => handleDeleteYear(y.id, e)} className="text-slate-400 hover:text-rose-600 p-1">
-                            <Trash2 className="w-3.5 h-3.5"/>
-                          </button>
+                          {isAdmin && (
+                            <button onClick={(e) => handleDeleteYear(y.id, e)} className="text-slate-400 hover:text-rose-600 p-1">
+                              <Trash2 className="w-3.5 h-3.5"/>
+                            </button>
+                          )}
                         </div>
                       </>
                     )}
@@ -476,9 +565,11 @@ export default function AdminPanel() {
                             <button onClick={() => setEditingArticle({ id: a.id, number: a.number, name: a.name })} className="text-slate-400 hover:text-amber-600 p-1">
                               <Edit2 className="w-3.5 h-3.5"/>
                             </button>
-                            <button onClick={(e) => handleDeleteArticle(a.id, e)} className="text-slate-400 hover:text-rose-600 p-1">
-                              <Trash2 className="w-3.5 h-3.5"/>
-                            </button>
+                            {isAdmin && (
+                              <button onClick={(e) => handleDeleteArticle(a.id, e)} className="text-slate-400 hover:text-rose-600 p-1">
+                                <Trash2 className="w-3.5 h-3.5"/>
+                              </button>
+                            )}
                           </div>
                         </>
                       )}
@@ -576,9 +667,11 @@ export default function AdminPanel() {
                             <button onClick={() => setEditingFraction({ id: f.id, code: f.code, name: f.name })} className="text-slate-400 hover:text-emerald-600 p-1">
                               <Edit2 className="w-3.5 h-3.5"/>
                             </button>
-                            <button onClick={(e) => handleDeleteFraction(f.id, e)} className="text-slate-400 hover:text-rose-600 p-1">
-                              <Trash2 className="w-3.5 h-3.5"/>
-                            </button>
+                            {isAdmin && (
+                              <button onClick={(e) => handleDeleteFraction(f.id, e)} className="text-slate-400 hover:text-rose-600 p-1">
+                                <Trash2 className="w-3.5 h-3.5"/>
+                              </button>
+                            )}
                           </div>
                         </>
                       )}
@@ -702,31 +795,121 @@ export default function AdminPanel() {
                     </td>
                   </tr>
                 ) : (
-                  documents.map(d => (
+                  documents.map(d => editingDocumentId === d.id ? (
+                    <tr key={d.id}>
+                      <td colSpan="4" className="p-3">
+                        <form onSubmit={e => handleUpdateDocument(e, d)} className="flex flex-wrap items-center gap-2">
+                          <input
+                            type="text"
+                            required
+                            value={documentEdit.title}
+                            onChange={e => setDocumentEdit({ ...documentEdit, title: e.target.value })}
+                            className="min-w-48 flex-1 text-sm border rounded px-2 py-1.5"
+                            aria-label="Título del documento"
+                          />
+                          <select
+                            value={documentEdit.period}
+                            onChange={e => setDocumentEdit({ ...documentEdit, period: e.target.value })}
+                            className="text-sm border rounded px-2 py-1.5 bg-white"
+                            aria-label="Periodo"
+                          >
+                            <option>Anual</option>
+                            <option>1er Trimestre</option>
+                            <option>2do Trimestre</option>
+                            <option>3er Trimestre</option>
+                            <option>4to Trimestre</option>
+                          </select>
+                          <select
+                            value={documentEdit.sourceType}
+                            onChange={e => setDocumentEdit({
+                              ...documentEdit,
+                              sourceType: e.target.value,
+                              file: null,
+                              url: ''
+                            })}
+                            className="text-sm border rounded px-2 py-1.5 bg-white"
+                            aria-label="Tipo de documento"
+                          >
+                            <option value="file">Archivo</option>
+                            <option value="url">URL</option>
+                          </select>
+                          {documentEdit.sourceType === 'url' ? (
+                            <input
+                              type="url"
+                              required
+                              pattern="https?://.+"
+                              value={documentEdit.url}
+                              onChange={e => setDocumentEdit({ ...documentEdit, url: e.target.value })}
+                              placeholder="https://..."
+                              className="min-w-48 flex-1 text-sm border rounded px-2 py-1.5"
+                              aria-label="URL del documento"
+                            />
+                          ) : (
+                            <input
+                              type="file"
+                              required={isExternalDocumentUrl(d.file_path)}
+                              onChange={e => setDocumentEdit({ ...documentEdit, file: e.target.files[0] })}
+                              className="min-w-48 flex-1 text-xs"
+                              aria-label="Archivo del documento"
+                            />
+                          )}
+                          <button type="submit" className="text-emerald-600 hover:text-emerald-800 p-1" title="Guardar cambios">
+                            <Check className="w-4 h-4" />
+                          </button>
+                          <button type="button" onClick={() => setEditingDocumentId(null)} className="text-slate-400 hover:text-slate-600 p-1" title="Cancelar">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </form>
+                      </td>
+                    </tr>
+                  ) : (
                     <tr key={d.id} className="hover:bg-slate-50">
-                      <td className="py-2.5 px-3 font-medium text-slate-800 flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-slate-400" />
-                        {d.title}
+                      <td className="py-2.5 px-3 font-medium text-slate-800">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                          <span>{d.title}</span>
+                        </div>
                       </td>
                       <td className="py-2.5 px-3">{d.period}</td>
                       <td className="py-2.5 px-3 text-xs text-slate-400">
                         {d.created_at ? d.created_at.split('T')[0] : 'Hoy'}
                       </td>
-                      <td className="py-2.5 px-3 text-right space-x-2">
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap">
                         <a
                           href={isExternalDocumentUrl(d.file_path) ? d.file_path : `${API_BASE}${d.file_path}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-slate-400 hover:text-blue-600 p-1 inline-block"
+                          title="Abrir documento"
                         >
                           <ExternalLink className="w-4 h-4" />
                         </a>
-                        <button 
-                          onClick={() => handleDeleteDocument(d.id)} 
-                          className="text-slate-400 hover:text-rose-600 p-1 inline-block"
+                        <button
+                          onClick={() => {
+                            const external = isExternalDocumentUrl(d.file_path);
+                            setDocumentEdit({
+                              title: d.title,
+                              period: d.period,
+                              sourceType: external ? 'url' : 'file',
+                              file: null,
+                              url: external ? d.file_path : ''
+                            });
+                            setEditingDocumentId(d.id);
+                          }}
+                          className="text-slate-400 hover:text-indigo-600 p-1 inline-block"
+                          title="Editar documento"
                         >
-                          <Trash2 className="w-4 h-4 inline" />
+                          <Edit2 className="w-4 h-4" />
                         </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDeleteDocument(d.id)}
+                            className="text-slate-400 hover:text-rose-600 p-1 inline-block"
+                            title="Eliminar documento"
+                          >
+                            <Trash2 className="w-4 h-4 inline" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -735,6 +918,91 @@ export default function AdminPanel() {
             </table>
           </div>
         </section>
+
+        {isAdmin && (
+          <section className="bg-white border rounded-lg p-6 shadow-sm">
+            <h2 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-violet-600" /> Usuarios y perfiles
+            </h2>
+
+            {userError && (
+              <p className="mb-3 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {userError}
+              </p>
+            )}
+
+            <form onSubmit={handleCreateUser} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pb-5 border-b border-slate-200">
+              <input
+                type="text"
+                required
+                value={newUser.username}
+                onChange={e => setNewUser({ ...newUser, username: e.target.value })}
+                placeholder="Nombre de usuario"
+                className="text-sm border rounded px-3 py-2 outline-none focus:ring-1 focus:ring-violet-500"
+              />
+              <input
+                type="text"
+                required
+                value={newUser.fullName}
+                onChange={e => setNewUser({ ...newUser, fullName: e.target.value })}
+                placeholder="Nombre completo"
+                className="text-sm border rounded px-3 py-2 outline-none focus:ring-1 focus:ring-violet-500"
+              />
+              <input
+                type="email"
+                required
+                value={newUser.email}
+                onChange={e => setNewUser({ ...newUser, email: e.target.value })}
+                placeholder="Correo electrónico"
+                className="text-sm border rounded px-3 py-2 outline-none focus:ring-1 focus:ring-violet-500"
+              />
+              <input
+                type="password"
+                required
+                minLength="8"
+                value={newUser.password}
+                onChange={e => setNewUser({ ...newUser, password: e.target.value })}
+                placeholder="Contraseña (mínimo 8 caracteres)"
+                className="text-sm border rounded px-3 py-2 outline-none focus:ring-1 focus:ring-violet-500"
+              />
+              <select
+                value={newUser.role}
+                onChange={e => setNewUser({ ...newUser, role: e.target.value })}
+                className="text-sm border rounded px-3 py-2 bg-white outline-none focus:ring-1 focus:ring-violet-500"
+                aria-label="Tipo de perfil"
+              >
+                <option value="usuario">Usuario</option>
+                <option value="admin">Administrador</option>
+              </select>
+              <button
+                type="submit"
+                className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded text-sm font-semibold"
+              >
+                Crear usuario
+              </button>
+            </form>
+
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2">
+              {users.map(account => (
+                <div key={account.id} className="flex items-center justify-between gap-3 rounded border border-slate-100 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-800 truncate">{account.full_name || account.username}</p>
+                    <p className="text-xs text-slate-500 truncate">
+                      {account.username} · {account.email || 'Sin correo'}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 rounded px-2 py-1 text-xs font-semibold ${
+                    account.role === 'admin'
+                      ? 'bg-violet-100 text-violet-700'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {account.role === 'admin' ? 'Administrador' : 'Usuario'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
     </div>
   );
