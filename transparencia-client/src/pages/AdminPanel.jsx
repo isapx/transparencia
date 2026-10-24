@@ -414,6 +414,11 @@ export default function AdminPanel() {
       {/* Header Administrativo */}
       <header className="bg-slate-900 text-white px-8 py-4 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-4">
+          <img
+            src="/logo.png"
+            alt="Escudo de Etchojoa"
+            className="h-12 w-12 flex-shrink-0 object-contain"
+          />
           <h1 className="text-xl font-bold tracking-tight">Panel de Administración de Transparencia</h1>
           <a
             href="/"

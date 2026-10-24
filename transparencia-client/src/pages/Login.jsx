@@ -38,9 +38,11 @@ export default function Login() {
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
         <div className="text-center mb-6">
-          <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-xl flex items-center justify-center mx-auto mb-3">
-            <Lock className="w-6 h-6" />
-          </div>
+          <img
+            src="/logo.png"
+            alt="Escudo de Etchojoa"
+            className="h-24 w-24 mx-auto mb-3 object-contain"
+          />
           <h2 className="text-2xl font-bold text-slate-900">Acceso Administrativo</h2>
           <p className="text-xs text-slate-500 mt-1">Transparencia Municipal</p>
         </div>

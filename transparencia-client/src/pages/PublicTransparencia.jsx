@@ -126,11 +126,18 @@ export default function PublicTransparencia() {
       {/* Cabecera */}
       <header className="bg-slate-900 text-white py-6 px-6 shadow-md border-b-4 border-emerald-600">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold tracking-wider uppercase">
-              <Building2 className="w-4 h-4" /> H. Ayuntamiento de Etchojoa
+          <div className="flex items-center gap-4">
+            <img
+              src="/logo.png"
+              alt="Escudo de Etchojoa"
+              className="h-20 w-20 flex-shrink-0 object-contain"
+            />
+            <div>
+              <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold tracking-wider uppercase">
+                <Building2 className="w-4 h-4" /> H. Ayuntamiento de Etchojoa
+              </div>
+              <h1 className="text-2xl font-black tracking-tight">Portal Ciudadano de Transparencia</h1>
             </div>
-            <h1 className="text-2xl font-black tracking-tight">Portal Ciudadano de Transparencia</h1>
           </div>
           <div className="flex items-center gap-2 bg-white/10 p-2 rounded-xl border border-white/15 backdrop-blur-sm">
             <Calendar className="w-4 h-4 text-emerald-400" />
