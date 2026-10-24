@@ -18,7 +18,7 @@ export async function authenticateToken(req, res, next) {
 
   try {
     const [rows] = await pool.query(
-      'SELECT id, username, role FROM users WHERE id = ?',
+      'SELECT id, username, full_name, role FROM users WHERE id = ?',
       [payload.id]
     );
     if (rows.length === 0) return res.status(403).json({ error: 'La cuenta ya no está disponible' });

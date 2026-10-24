@@ -338,7 +338,15 @@ app.post('/api/fractions', authenticateToken, async (req, res) => {
 // ==========================================
 app.get('/api/documents/:fractionId', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM documents WHERE fraction_id = ?', [req.params.fractionId]);
+    const [rows] = await pool.query(
+      `SELECT documents.*, users.username AS created_by_username,
+              COALESCE(users.full_name, users.username) AS created_by_name
+       FROM documents
+       LEFT JOIN users ON users.id = documents.created_by_id
+       WHERE documents.fraction_id = ?
+       ORDER BY documents.created_at DESC`,
+      [req.params.fractionId]
+    );
     res.json(rows);
   } catch (e) {
     console.error('Error al listar documentos:', e.message);
@@ -374,8 +382,8 @@ app.post('/api/documents', authenticateToken, upload.single('file'), async (req,
     }
 
     const [result] = await pool.query(
-      'INSERT INTO documents (fraction_id, title, period, file_path) VALUES (?, ?, ?, ?)',
-      [fractionId, title.trim(), period.trim(), filePath]
+      'INSERT INTO documents (fraction_id, title, period, file_path, created_by_id) VALUES (?, ?, ?, ?, ?)',
+      [fractionId, title.trim(), period.trim(), filePath, req.user.id]
     );
 
     res.json({
@@ -384,6 +392,9 @@ app.post('/api/documents', authenticateToken, upload.single('file'), async (req,
       title: title.trim(),
       period: period.trim(),
       file_path: filePath,
+      created_by_id: req.user.id,
+      created_by_name: req.user.full_name || req.user.username,
+      created_by_username: req.user.username,
       created_at: new Date().toISOString()
     });
   } catch (e) {
@@ -540,6 +551,16 @@ app.delete('/api/fractions/:id', authenticateToken, requireRole('admin'), async 
   }
 });
 
+function formatDocumentTimestamp(value) {
+  if (!value) return 'Fecha no registrada';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Fecha no registrada';
+  return date.toLocaleString('es-MX', {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  });
+}
+
 async function ensureUserProfileSchema() {
   const [columns] = await pool.query(
     `SELECT COLUMN_NAME
@@ -566,6 +587,30 @@ async function ensureUserProfileSchema() {
   );
   if (indexes.length === 0) {
     await pool.query('CREATE UNIQUE INDEX users_email_unique ON users (email)');
+  }
+
+  const [documentColumns] = await pool.query(
+    `SELECT COLUMN_NAME
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'documents'
+       AND COLUMN_NAME = 'created_by_id'`
+  );
+  if (documentColumns.length === 0) {
+    await pool.query('ALTER TABLE documents ADD COLUMN created_by_id INT NULL');
+  }
+  const [documentIndexes] = await pool.query(
+    `SELECT CONSTRAINT_NAME
+     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'documents'
+       AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+       AND CONSTRAINT_NAME = 'documents_created_by_fk'`
+  );
+  if (documentIndexes.length === 0) {
+    await pool.query(
+      'ALTER TABLE documents ADD CONSTRAINT documents_created_by_fk FOREIGN KEY (created_by_id) REFERENCES users(id) ON DELETE SET NULL'
+    );
   }
 }
 

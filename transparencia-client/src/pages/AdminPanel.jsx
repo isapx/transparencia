@@ -872,21 +872,20 @@ export default function AdminPanel() {
                 <tr>
                   <th className="py-2.5 px-3">Título</th>
                   <th className="py-2.5 px-3">Periodo</th>
-                  <th className="py-2.5 px-3">Fecha de Carga</th>
                   <th className="py-2.5 px-3 text-right">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {documents.length === 0 ? (
                   <tr>
-                    <td colSpan="4" className="text-center py-6 text-slate-400">
+                    <td colSpan="3" className="text-center py-6 text-slate-400">
                       No hay documentos cargados en esta fracción.
                     </td>
                   </tr>
                 ) : (
                   documents.map(d => editingDocumentId === d.id ? (
                     <tr key={d.id}>
-                      <td colSpan="4" className="p-3">
+                      <td colSpan="3" className="p-3">
                         <form onSubmit={e => handleUpdateDocument(e, d)} className="flex flex-wrap items-center gap-2">
                           <input
                             type="text"
@@ -960,9 +959,6 @@ export default function AdminPanel() {
                         </div>
                       </td>
                       <td className="py-2.5 px-3">{d.period}</td>
-                      <td className="py-2.5 px-3 text-xs text-slate-400">
-                        {d.created_at ? d.created_at.split('T')[0] : 'Hoy'}
-                      </td>
                       <td className="py-2.5 px-3 text-right whitespace-nowrap">
                         <a
                           href={isExternalDocumentUrl(d.file_path) ? d.file_path : `${API_BASE}${d.file_path}`}

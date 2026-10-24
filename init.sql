@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS documents (
   title VARCHAR(255) NOT NULL,
   period VARCHAR(50) NOT NULL,
   file_path VARCHAR(500) NOT NULL,
+  created_by_id INT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (fraction_id) REFERENCES fractions(id) ON DELETE CASCADE
+  FOREIGN KEY (fraction_id) REFERENCES fractions(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_id) REFERENCES users(id) ON DELETE SET NULL
 );

@@ -321,7 +321,6 @@ export default function PublicTransparencia() {
                           <span className="font-medium text-slate-700 bg-white border px-1.5 py-0.5 rounded">
                             {doc.period}
                           </span>
-                          <span className="whitespace-nowrap">{doc.created_at ? doc.created_at.split('T')[0] : 'Reciente'}</span>
                         </div>
                       </div>
                     </div>
