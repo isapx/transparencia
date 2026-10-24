@@ -45,7 +45,7 @@ function romanToInt(str) {
 }
 
 export default function AdminPanel() {
-  const { token, logout, user } = useAuth();
+  const { token, logout, user, updateUser } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [years, setYears] = useState([]);
   const [articles, setArticles] = useState([]);
@@ -53,6 +53,10 @@ export default function AdminPanel() {
   const [documents, setDocuments] = useState([]);
   const [users, setUsers] = useState([]);
   const [userError, setUserError] = useState('');
+  const [profile, setProfile] = useState({ fullName: user?.fullName || '', email: user?.email || '', currentPassword: '', password: '' });
+  const [profileMessage, setProfileMessage] = useState('');
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [userEdit, setUserEdit] = useState({ email: '', password: '' });
 
   // Selecciones activas
   const [selectedYearId, setSelectedYearId] = useState('');
@@ -391,6 +395,42 @@ export default function AdminPanel() {
     }
   };
 
+  const handleUpdateProfile = async (e) => {
+    e.preventDefault();
+    setProfileMessage('');
+    const payload = {
+      fullName: profile.fullName,
+      email: profile.email,
+      ...(profile.password ? { password: profile.password, currentPassword: profile.currentPassword } : {})
+    };
+    const res = await fetch(`${API_BASE}/api/users/me`, {
+      method: 'PUT', headers, body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setProfileMessage(data.error || 'No se pudo actualizar el perfil.');
+      return;
+    }
+    updateUser(data);
+    setProfile({ fullName: data.fullName, email: data.email, currentPassword: '', password: '' });
+    setProfileMessage('Perfil actualizado correctamente.');
+  };
+
+  const handleUpdateAccount = async (accountId) => {
+    setUserError('');
+    const res = await fetch(`${API_BASE}/api/users/${accountId}`, {
+      method: 'PUT', headers,
+      body: JSON.stringify({ email: userEdit.email, ...(userEdit.password ? { password: userEdit.password } : {}) })
+    });
+    const updated = await res.json();
+    if (!res.ok) {
+      setUserError(updated.error || 'No se pudo actualizar el usuario.');
+      return;
+    }
+    setUsers(users.map(account => account.id === accountId ? updated : account));
+    setEditingUserId(null);
+  };
+
   const handleCreateUser = async (e) => {
     e.preventDefault();
     setUserError('');
@@ -443,6 +483,50 @@ export default function AdminPanel() {
       </header>
 
       <main className="max-w-7xl mx-auto p-6 space-y-6">
+        <section className="bg-white border rounded-lg p-6 shadow-sm">
+          <h2 className="text-base font-bold text-slate-800 mb-4">Mi perfil</h2>
+          <form onSubmit={handleUpdateProfile} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            <input
+              type="text"
+              required
+              value={profile.fullName}
+              onChange={e => setProfile({ ...profile, fullName: e.target.value })}
+              placeholder="Nombre completo"
+              className="text-sm border rounded px-3 py-2 outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <input
+              type="email"
+              required
+              value={profile.email}
+              onChange={e => setProfile({ ...profile, email: e.target.value })}
+              placeholder="Correo electrónico"
+              className="text-sm border rounded px-3 py-2 outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <input
+              type="password"
+              value={profile.password}
+              minLength="8"
+              onChange={e => setProfile({ ...profile, password: e.target.value })}
+              placeholder="Nueva contraseña (opcional)"
+              className="text-sm border rounded px-3 py-2 outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <input
+              type="password"
+              value={profile.currentPassword}
+              onChange={e => setProfile({ ...profile, currentPassword: e.target.value })}
+              placeholder="Contraseña actual"
+              className="text-sm border rounded px-3 py-2 outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <button
+              type="submit"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded text-sm font-semibold lg:col-span-4"
+            >
+              Guardar cambios
+            </button>
+          </form>
+          {profileMessage && <p className="mt-3 text-sm text-slate-600">{profileMessage}</p>}
+        </section>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           
           {/* 1. SECCIÓN AÑOS */}
@@ -989,20 +1073,61 @@ export default function AdminPanel() {
 
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2">
               {users.map(account => (
-                <div key={account.id} className="flex items-center justify-between gap-3 rounded border border-slate-100 px-3 py-2">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-800 truncate">{account.full_name || account.username}</p>
-                    <p className="text-xs text-slate-500 truncate">
-                      {account.username} · {account.email || 'Sin correo'}
-                    </p>
-                  </div>
-                  <span className={`shrink-0 rounded px-2 py-1 text-xs font-semibold ${
-                    account.role === 'admin'
-                      ? 'bg-violet-100 text-violet-700'
-                      : 'bg-slate-100 text-slate-600'
-                  }`}>
-                    {account.role === 'admin' ? 'Administrador' : 'Usuario'}
-                  </span>
+                <div key={account.id} className="rounded border border-slate-100 px-3 py-2">
+                  {editingUserId === account.id ? (
+                    <div className="grid grid-cols-1 gap-2">
+                      <input
+                        type="email"
+                        required
+                        value={userEdit.email}
+                        onChange={e => setUserEdit({ ...userEdit, email: e.target.value })}
+                        className="text-sm border rounded px-2 py-1.5"
+                        aria-label="Correo del usuario"
+                      />
+                      <input
+                        type="password"
+                        minLength="8"
+                        value={userEdit.password}
+                        onChange={e => setUserEdit({ ...userEdit, password: e.target.value })}
+                        placeholder="Nueva contraseña (opcional)"
+                        className="text-sm border rounded px-2 py-1.5"
+                        aria-label="Nueva contraseña del usuario"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button type="button" onClick={() => setEditingUserId(null)} className="text-xs text-slate-500 px-2 py-1">Cancelar</button>
+                        <button type="button" onClick={() => handleUpdateAccount(account.id)} className="bg-violet-600 text-white text-xs font-semibold rounded px-3 py-1.5">Guardar</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 truncate">{account.full_name || account.username}</p>
+                        <p className="text-xs text-slate-500 truncate">
+                          {account.username} · {account.email || 'Sin correo'}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className={`rounded px-2 py-1 text-xs font-semibold ${
+                          account.role === 'admin'
+                            ? 'bg-violet-100 text-violet-700'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {account.role === 'admin' ? 'Administrador' : 'Usuario'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingUserId(account.id);
+                            setUserEdit({ email: account.email || '', password: '' });
+                          }}
+                          className="text-slate-400 hover:text-violet-600 p-1"
+                          title="Editar correo y contraseña"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

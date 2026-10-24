@@ -146,6 +146,85 @@ app.post('/api/users', authenticateToken, requireRole('admin'), async (req, res)
   }
 });
 
+app.put('/api/users/me', authenticateToken, async (req, res) => {
+  const fullName = typeof req.body.fullName === 'string' ? req.body.fullName.trim() : '';
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const { password, currentPassword } = req.body;
+
+  if (!fullName || !email) {
+    return res.status(400).json({ error: 'El nombre y el correo electrónico son obligatorios.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
+  }
+  if (password !== undefined && (typeof password !== 'string' || password.length < 8)) {
+    return res.status(400).json({ error: 'La contraseña nueva debe tener al menos 8 caracteres.' });
+  }
+  if (password && (!currentPassword || typeof currentPassword !== 'string')) {
+    return res.status(400).json({ error: 'Ingresa tu contraseña actual para cambiarla.' });
+  }
+
+  try {
+    const [rows] = await pool.query('SELECT password FROM users WHERE id = ?', [req.user.id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+    if (password) {
+      const matches = await bcrypt.compare(currentPassword, rows[0].password);
+      if (!matches) return res.status(401).json({ error: 'La contraseña actual no es correcta.' });
+    }
+
+    const fields = ['full_name = ?', 'email = ?'];
+    const values = [fullName, email];
+    if (password) {
+      fields.push('password = ?');
+      values.push(await bcrypt.hash(password, 10));
+    }
+    values.push(req.user.id);
+
+    await pool.query(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
+    res.json({ id: req.user.id, username: req.user.username, fullName, email, role: req.user.role });
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'El correo electrónico ya está registrado.' });
+    }
+    console.error('Error al actualizar perfil:', e.message);
+    res.status(500).json({ error: 'Error al actualizar tu perfil.' });
+  }
+});
+
+app.put('/api/users/:id', authenticateToken, requireRole('admin'), async (req, res) => {
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const password = req.body.password;
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
+  }
+  if (password !== undefined && (typeof password !== 'string' || password.length < 8)) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
+  }
+
+  try {
+    const passwordHash = password ? await bcrypt.hash(password, 10) : null;
+    const [result] = await pool.query(
+      'UPDATE users SET email = ?, password = COALESCE(?, password) WHERE id = ?',
+      [email, passwordHash, req.params.id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+    const [rows] = await pool.query(
+      'SELECT id, username, full_name, email, role, created_at FROM users WHERE id = ?',
+      [req.params.id]
+    );
+    res.json(rows[0]);
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'El correo electrónico ya está registrado.' });
+    }
+    console.error('Error al actualizar usuario:', e.message);
+    res.status(500).json({ error: 'Error al actualizar el usuario.' });
+  }
+});
+
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   try {
