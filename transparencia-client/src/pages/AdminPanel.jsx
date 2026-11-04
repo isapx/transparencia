@@ -362,14 +362,23 @@ export default function AdminPanel() {
           try {
             response = JSON.parse(request.responseText);
           } catch {
-            reject(new Error('El servidor devolvió una respuesta inválida.'));
+            response = null;
+          }
+          if (request.status < 200 || request.status >= 300) {
+            const statusText = `HTTP ${request.status}${request.statusText ? ` ${request.statusText}` : ''}`;
+            const errorMessage = request.status === 413
+              ? 'El servidor o proxy rechazó el archivo por su tamaño (HTTP 413). Revisa el límite de carga del proxy.'
+              : [502, 503, 504].includes(request.status)
+                ? `El servidor o proxy interrumpió la solicitud (${statusText}). Revisa sus tiempos de espera y los registros.`
+                : response?.error || `No se pudo guardar el documento (${statusText}).`;
+            reject(new Error(errorMessage));
             return;
           }
-          if (request.status >= 200 && request.status < 300) {
-            resolve(response);
-          } else {
-            reject(new Error(response.error || 'No se pudo guardar el documento.'));
+          if (!response || typeof response !== 'object') {
+            reject(new Error(`El servidor devolvió una respuesta inválida (${request.statusText || `HTTP ${request.status}`}).`));
+            return;
           }
+          resolve(response);
         };
         request.onerror = () => reject(new Error('No se pudo conectar con el servidor.'));
         request.onabort = () => reject(new Error('La carga fue cancelada.'));
