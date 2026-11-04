@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { pool } from './db.js';
 import { authenticateToken, requireRole } from './authMiddleware.js';
@@ -13,6 +14,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+const server = createServer(app);
+const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
+server.requestTimeout = 30 * 60 * 1000;
 app.use(cors());
 app.use(express.json());
 
@@ -29,7 +33,25 @@ const storage = multer.diskStorage({
     cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: { fileSize: MAX_UPLOAD_SIZE }
+});
+
+function receiveDocumentUpload(req, res, next) {
+  upload.single('file')(req, res, error => {
+    if (!error) return next();
+    if (error instanceof multer.MulterError) {
+      if (error.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ error: 'El archivo supera el límite permitido de 100 MB.' });
+      }
+      return res.status(400).json({ error: 'No se pudo procesar el archivo enviado.' });
+    }
+
+    console.error('Error al recibir archivo:', error.message);
+    return res.status(500).json({ error: 'No se pudo recibir el archivo.' });
+  });
+}
 
 function removeUploadedFile(file) {
   if (!file) return;
@@ -354,7 +376,7 @@ app.get('/api/documents/:fractionId', async (req, res) => {
   }
 });
 
-app.post('/api/documents', authenticateToken, upload.single('file'), async (req, res) => {
+app.post('/api/documents', authenticateToken, receiveDocumentUpload, async (req, res) => {
   try {
     const { fractionId, title, period } = req.body;
     const url = typeof req.body.url === 'string' ? req.body.url.trim() : '';
@@ -404,7 +426,7 @@ app.post('/api/documents', authenticateToken, upload.single('file'), async (req,
   }
 });
 
-app.put('/api/documents/:id', authenticateToken, upload.single('file'), async (req, res) => {
+app.put('/api/documents/:id', authenticateToken, receiveDocumentUpload, async (req, res) => {
   try {
     const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
     const period = typeof req.body.period === 'string' ? req.body.period.trim() : '';
@@ -616,7 +638,7 @@ async function ensureUserProfileSchema() {
 
 const PORT = process.env.PORT || 4000;
 ensureUserProfileSchema()
-  .then(() => app.listen(PORT, () => console.log(`API lista en http://localhost:${PORT}`)))
+  .then(() => server.listen(PORT, () => console.log(`API lista en http://localhost:${PORT}`)))
   .catch(async error => {
     console.error('Error al preparar la base de datos de usuarios:', error.message);
     await pool.end();

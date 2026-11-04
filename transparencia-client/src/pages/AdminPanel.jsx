@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 const API_BASE = '';
+const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
 
 function isExternalDocumentUrl(value) {
   return /^https?:\/\//i.test(value || '');
@@ -329,6 +330,10 @@ export default function AdminPanel() {
     if (!selectedFractionId) return;
     if (docUpload.sourceType === 'file' && !docUpload.file) return;
     if (docUpload.sourceType === 'url' && !isExternalDocumentUrl(docUpload.url)) return;
+    if (docUpload.sourceType === 'file' && docUpload.file.size > MAX_UPLOAD_SIZE) {
+      alert('El archivo supera el límite permitido de 100 MB.');
+      return;
+    }
 
     const formData = new FormData();
     formData.append('fractionId', selectedFractionId);
@@ -885,6 +890,9 @@ export default function AdminPanel() {
                 onChange={e => setDocUpload({ ...docUpload, url: e.target.value })}
                 className="text-sm border rounded px-3 py-1.5 outline-none focus:ring-1 focus:ring-blue-500 flex-grow md:flex-grow-0 md:w-80"
               />
+            )}
+            {docUpload.sourceType === 'file' && (
+              <span className="text-xs text-slate-500">Máximo 100 MB</span>
             )}
             <button
               type="submit"
