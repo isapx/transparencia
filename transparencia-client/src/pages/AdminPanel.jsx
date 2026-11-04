@@ -82,6 +82,7 @@ export default function AdminPanel() {
     role: 'usuario'
   });
   const [editingDocumentId, setEditingDocumentId] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState({ active: false, percent: 0 });
   const [documentEdit, setDocumentEdit] = useState({
     title: '',
     period: '1er Trimestre',
@@ -339,19 +340,43 @@ export default function AdminPanel() {
       formData.append('url', docUpload.url);
     }
 
-    const res = await fetch(`${API_BASE}/api/documents`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-      body: formData
-    });
+    setUploadProgress({ active: true, percent: docUpload.sourceType === 'file' ? 0 : 100 });
 
-    if (res.ok) {
-      const added = await res.json();
+    try {
+      const added = await new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open('POST', `${API_BASE}/api/documents`);
+        request.setRequestHeader('Authorization', `Bearer ${token}`);
+        request.upload.onprogress = event => {
+          if (event.lengthComputable) {
+            setUploadProgress({ active: true, percent: Math.round((event.loaded / event.total) * 100) });
+          }
+        };
+        request.onload = () => {
+          let response;
+          try {
+            response = JSON.parse(request.responseText);
+          } catch {
+            reject(new Error('El servidor devolvió una respuesta inválida.'));
+            return;
+          }
+          if (request.status >= 200 && request.status < 300) {
+            resolve(response);
+          } else {
+            reject(new Error(response.error || 'No se pudo guardar el documento.'));
+          }
+        };
+        request.onerror = () => reject(new Error('No se pudo conectar con el servidor.'));
+        request.onabort = () => reject(new Error('La carga fue cancelada.'));
+        request.send(formData);
+      });
+
       setDocuments([...documents, added]);
       setDocUpload({ title: '', period: '1er Trimestre', sourceType: 'file', file: null, url: '' });
-    } else {
-      const error = await res.json();
-      alert(error.error || 'No se pudo guardar el documento.');
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setUploadProgress({ active: false, percent: 0 });
     }
   };
 
@@ -809,11 +834,13 @@ export default function AdminPanel() {
               placeholder="Título descriptivo del documento" 
               required 
               value={docUpload.title} 
+              disabled={uploadProgress.active}
               onChange={e => setDocUpload({ ...docUpload, title: e.target.value })} 
               className="text-sm border rounded px-3 py-1.5 outline-none focus:ring-1 focus:ring-blue-500 flex-grow md:flex-grow-0 md:w-80" 
             />
             <select
               value={docUpload.sourceType}
+              disabled={uploadProgress.active}
               onChange={e => setDocUpload({
                 ...docUpload,
                 sourceType: e.target.value,
@@ -828,6 +855,7 @@ export default function AdminPanel() {
             </select>
             <select 
               value={docUpload.period} 
+              disabled={uploadProgress.active}
               onChange={e => setDocUpload({ ...docUpload, period: e.target.value })} 
               className="text-sm border rounded px-3 py-1.5 bg-white outline-none"
             >
@@ -841,6 +869,7 @@ export default function AdminPanel() {
               <input
                 type="file"
                 required
+                disabled={uploadProgress.active}
                 onChange={e => setDocUpload({ ...docUpload, file: e.target.files[0] })}
                 className="text-sm file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
               />
@@ -852,19 +881,35 @@ export default function AdminPanel() {
                 title="Ingresa una URL que comience con http:// o https://"
                 placeholder="https://..."
                 value={docUpload.url}
+                disabled={uploadProgress.active}
                 onChange={e => setDocUpload({ ...docUpload, url: e.target.value })}
                 className="text-sm border rounded px-3 py-1.5 outline-none focus:ring-1 focus:ring-blue-500 flex-grow md:flex-grow-0 md:w-80"
               />
             )}
             <button
               type="submit"
-              disabled={!selectedFractionId || (docUpload.sourceType === 'file' && !docUpload.file)}
+              disabled={uploadProgress.active || !selectedFractionId || (docUpload.sourceType === 'file' && !docUpload.file)}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
             >
               {docUpload.sourceType === 'file' ? <FileUp className="w-4 h-4" /> : <ExternalLink className="w-4 h-4" />}
-              {docUpload.sourceType === 'file' ? 'Subir Archivo' : 'Guardar URL'}
+              {uploadProgress.active ? 'Subiendo...' : docUpload.sourceType === 'file' ? 'Subir Archivo' : 'Guardar URL'}
             </button>
           </form>
+
+          {uploadProgress.active && (
+            <div className="mt-3" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={uploadProgress.percent}>
+              <div className="mb-1 flex items-center justify-between text-xs text-slate-600">
+                <span>{docUpload.sourceType === 'file' ? 'Subiendo archivo' : 'Guardando enlace'}</span>
+                {docUpload.sourceType === 'file' && <span>{uploadProgress.percent}%</span>}
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full bg-blue-600 transition-[width] duration-150 ${docUpload.sourceType === 'url' ? 'animate-pulse w-full' : ''}`}
+                  style={docUpload.sourceType === 'file' ? { width: `${uploadProgress.percent}%` } : undefined}
+                />
+              </div>
+            </div>
+          )}
 
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-left text-sm text-slate-600">
