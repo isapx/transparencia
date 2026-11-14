@@ -22,13 +22,34 @@ export default function Login() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Credenciales inválidas');
+      const contentType = res.headers.get('content-type') || '';
+      let data;
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+      }
+
+      if (!res.ok) {
+        if (data?.error) throw new Error(data.error);
+        throw new Error(
+          `El servidor respondió HTTP ${res.status} sin JSON. Verifica que Nginx envíe /api/ a la API.`
+        );
+      }
+      if (!data || typeof data.token !== 'string' || !data.user) {
+        throw new Error(
+          `La respuesta de autenticación no es válida (HTTP ${res.status}). Verifica el proxy de /api/.`
+        );
+      }
 
       login(data.token, data.user);
       navigate('/admin');
     } catch (err) {
-      setError(err.message);
+      setError(err instanceof TypeError
+        ? 'No se pudo conectar con el servidor. Verifica que la API esté activa.'
+        : err.message);
     } finally {
       setLoading(false);
     }

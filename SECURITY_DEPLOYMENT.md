@@ -8,7 +8,29 @@
 - Expón únicamente los puertos 80/443 y SSH restringido; no expongas MySQL al público.
 - Configura el proxy para reemplazar `X-Forwarded-For` y `X-Forwarded-Proto`. Usa `TRUST_PROXY_HOPS=1` solo con un proxy confiable delante de Node.
 
-El proxy debe servir `transparencia-client/dist` y enviar `/api` y `/uploads` a `127.0.0.1:4000`. Configura también en el proxy los límites y tiempos de espera necesarios para cargas de hasta 100 MB. Para el frontend, aplica `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN` y una CSP con `frame-ancestors 'self'`; activa HSTS solo después de comprobar HTTPS.
+El proxy debe servir `transparencia-client/dist` y enviar `/api` y `/uploads` a `127.0.0.1:4000`. En Nginx, conserva el prefijo `/api` al reenviar la solicitud:
+
+```nginx
+location /api/ {
+    proxy_pass http://127.0.0.1:4000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /uploads/ {
+    proxy_pass http://127.0.0.1:4000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    client_max_body_size 101m;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+}
+```
+
+Si Nginx corre dentro de otro contenedor, `127.0.0.1` apunta a ese contenedor, no al proceso Node; usa la dirección o nombre del servicio accesible desde Nginx. Para el frontend, aplica `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN` y una CSP con `frame-ancestors 'self'`; activa HSTS solo después de comprobar HTTPS.
 
 ## Variables de entorno
 
