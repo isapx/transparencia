@@ -75,6 +75,7 @@ export default function Login() {
               <input
                 type="password"
                 required
+                maxLength="72"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"

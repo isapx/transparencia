@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -8,6 +10,7 @@ import jwt from 'jsonwebtoken';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { pool } from './db.js';
+import { JWT_SECRET } from './securityConfig.js';
 import { authenticateToken, requireRole } from './authMiddleware.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -16,14 +19,56 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = createServer(app);
 const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
-server.requestTimeout = 30 * 60 * 1000;
-app.use(cors());
-app.use(express.json());
+const ALLOWED_UPLOAD_EXTENSIONS = new Set([
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx',
+  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.avif',
+  '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.tgz'
+]);
+const INLINE_UPLOAD_EXTENSIONS = new Set([
+  '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.avif'
+]);
+const productionOrigins = ['https://transparencia.etchojoa.gob.mx'];
+const developmentOrigins = ['http://127.0.0.1:5173', 'http://localhost:5173'];
+const allowedOrigins = new Set(
+  (process.env.CORS_ORIGINS || (process.env.NODE_ENV === 'production'
+    ? productionOrigins.join(',')
+    : developmentOrigins.join(',')))
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean)
+);
+const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
+if (!Number.isInteger(trustedProxyHops) || trustedProxyHops < 0) {
+  throw new Error('TRUST_PROXY_HOPS debe ser un entero no negativo.');
+}
+
+app.disable('x-powered-by');
+app.set('trust proxy', trustedProxyHops);
+app.use(helmet());
+app.use(cors({
+  origin(origin, callback) {
+    callback(null, !origin || allowedOrigins.has(origin));
+  }
+}));
+app.use(express.json({ limit: '16kb' }));
+app.use((req, res, next) => {
+  req.body ??= {};
+  next();
+});
 
 // Carpeta pública de descargas
 const uploadPath = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
-app.use('/uploads', express.static(uploadPath));
+app.use('/uploads', express.static(uploadPath, {
+  dotfiles: 'deny',
+  index: false,
+  setHeaders(res, filePath) {
+    const extension = path.extname(filePath).toLowerCase();
+    if (!INLINE_UPLOAD_EXTENSIONS.has(extension)) {
+      res.setHeader('Content-Disposition', 'attachment');
+    }
+  }
+}));
 
 // Configuración de Multer
 const storage = multer.diskStorage({
@@ -35,7 +80,21 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: MAX_UPLOAD_SIZE }
+  limits: {
+    fileSize: MAX_UPLOAD_SIZE,
+    files: 1,
+    fields: 4,
+    fieldSize: 16 * 1024,
+    parts: 5
+  },
+  fileFilter: (req, file, callback) => {
+    if (!ALLOWED_UPLOAD_EXTENSIONS.has(path.extname(file.originalname).toLowerCase())) {
+      const error = new Error('Tipo de archivo no permitido.');
+      error.code = 'UNSUPPORTED_FILE_TYPE';
+      return callback(error);
+    }
+    callback(null, true);
+  }
 });
 
 function receiveDocumentUpload(req, res, next) {
@@ -46,6 +105,11 @@ function receiveDocumentUpload(req, res, next) {
         return res.status(413).json({ error: 'El archivo supera el límite permitido de 100 MB.' });
       }
       return res.status(400).json({ error: 'No se pudo procesar el archivo enviado.' });
+    }
+    if (error.code === 'UNSUPPORTED_FILE_TYPE') {
+      return res.status(415).json({
+        error: 'Tipo de archivo no permitido. Usa PDF, DOC/DOCX, XLS/XLSX, imágenes raster o archivos comprimidos.'
+      });
     }
 
     console.error('Error al recibir archivo:', error.message);
@@ -72,51 +136,35 @@ function isValidDocumentUrl(value) {
   }
 }
 
+function isValidPassword(value) {
+  return typeof value === 'string'
+    && [...value].length >= 12
+    && Buffer.byteLength(value, 'utf8') <= 72;
+}
+
+const loginRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos. Espera 15 minutos e inténtalo de nuevo.' }
+});
+const apiRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Se alcanzó el límite temporal de solicitudes.' }
+});
+
+app.use('/api', apiRateLimit, (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+
 // ==========================================
 // AUTENTICACIÓN
 // ==========================================
-app.post('/api/auth/register', async (req, res) => {
-  const username = typeof req.body.username === 'string' ? req.body.username.trim() : '';
-  const fullName = typeof req.body.fullName === 'string' ? req.body.fullName.trim() : '';
-  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-  const { password } = req.body;
-  if (!username || !fullName || !email || typeof password !== 'string' || password.length < 8) {
-    return res.status(400).json({ error: 'Completa todos los campos y usa una contraseña de al menos 8 caracteres.' });
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
-  }
-
-  let connection;
-  try {
-    connection = await pool.getConnection();
-    await connection.query('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
-    await connection.beginTransaction();
-    const [existingUsers] = await connection.query('SELECT id FROM users FOR UPDATE');
-    if (existingUsers.length > 0) {
-      await connection.rollback();
-      return res.status(403).json({ error: 'El registro inicial ya fue realizado.' });
-    }
-
-    const hash = await bcrypt.hash(password, 10);
-    const [result] = await connection.query(
-      'INSERT INTO users (username, full_name, email, password, role) VALUES (?, ?, ?, ?, ?)',
-      [username, fullName, email, hash, 'admin']
-    );
-    await connection.commit();
-    res.json({ message: 'Usuario registrado', userId: result.insertId });
-  } catch (e) {
-    if (connection) await connection.rollback();
-    if (e.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ error: 'El usuario o correo electrónico ya está registrado.' });
-    }
-    console.error('Error al registrar usuario:', e.message);
-    res.status(500).json({ error: 'Error al registrar el usuario inicial.' });
-  } finally {
-    connection?.release();
-  }
-});
-
 app.get('/api/users', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -135,8 +183,9 @@ app.post('/api/users', authenticateToken, requireRole('admin'), async (req, res)
   const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   const { password, role } = req.body;
 
-  if (!username || !fullName || !email || typeof password !== 'string' || password.length < 8) {
-    return res.status(400).json({ error: 'Completa todos los campos y usa una contraseña de al menos 8 caracteres.' });
+  if (!username || username.length > 100 || !fullName || fullName.length > 255
+    || !email || email.length > 255 || !isValidPassword(password)) {
+    return res.status(400).json({ error: 'Completa los campos y usa una contraseña de 12 a 72 bytes.' });
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
@@ -146,7 +195,7 @@ app.post('/api/users', authenticateToken, requireRole('admin'), async (req, res)
   }
 
   try {
-    const hash = await bcrypt.hash(password, 10);
+    const hash = await bcrypt.hash(password, 12);
     const [result] = await pool.query(
       'INSERT INTO users (username, full_name, email, password, role) VALUES (?, ?, ?, ?, ?)',
       [username, fullName, email, hash, role]
@@ -179,8 +228,8 @@ app.put('/api/users/me', authenticateToken, async (req, res) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
   }
-  if (password !== undefined && (typeof password !== 'string' || password.length < 8)) {
-    return res.status(400).json({ error: 'La contraseña nueva debe tener al menos 8 caracteres.' });
+  if (password !== undefined && !isValidPassword(password)) {
+    return res.status(400).json({ error: 'La contraseña nueva debe tener al menos 12 caracteres y no superar 72 bytes.' });
   }
   if (password && (!currentPassword || typeof currentPassword !== 'string')) {
     return res.status(400).json({ error: 'Ingresa tu contraseña actual para cambiarla.' });
@@ -199,7 +248,7 @@ app.put('/api/users/me', authenticateToken, async (req, res) => {
     const values = [fullName, email];
     if (password) {
       fields.push('password = ?');
-      values.push(await bcrypt.hash(password, 10));
+      values.push(await bcrypt.hash(password, 12));
     }
     values.push(req.user.id);
 
@@ -221,12 +270,12 @@ app.put('/api/users/:id', authenticateToken, requireRole('admin'), async (req, r
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
   }
-  if (password !== undefined && (typeof password !== 'string' || password.length < 8)) {
-    return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
+  if (password !== undefined && !isValidPassword(password)) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 12 caracteres y no superar 72 bytes.' });
   }
 
   try {
-    const passwordHash = password ? await bcrypt.hash(password, 10) : null;
+    const passwordHash = password ? await bcrypt.hash(password, 12) : null;
     const [result] = await pool.query(
       'UPDATE users SET email = ?, password = COALESCE(?, password) WHERE id = ?',
       [email, passwordHash, req.params.id]
@@ -247,8 +296,13 @@ app.put('/api/users/:id', authenticateToken, requireRole('admin'), async (req, r
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginRateLimit, async (req, res) => {
   const { username, password } = req.body;
+  if (typeof username !== 'string' || !username || username.length > 100
+    || typeof password !== 'string' || !password || Buffer.byteLength(password, 'utf8') > 72) {
+    return res.status(401).json({ error: 'Credenciales inválidas' });
+  }
+
   try {
     const [rows] = await pool.query(
       'SELECT id, username, full_name, email, password, role FROM users WHERE username = ?',
@@ -259,7 +313,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (!match) return res.status(401).json({ error: 'Credenciales inválidas' });
     
     const { id, role, full_name: fullName, email } = rows[0];
-    const token = jwt.sign({ id, username: rows[0].username }, process.env.JWT_SECRET, { expiresIn: '8h' });
+    const token = jwt.sign({ id, username: rows[0].username }, JWT_SECRET, { expiresIn: '8h' });
     res.json({
       token,
       user: { id, username: rows[0].username, fullName, email, role }
@@ -573,6 +627,21 @@ app.delete('/api/fractions/:id', authenticateToken, requireRole('admin'), async 
   }
 });
 
+app.use((req, res) => {
+  res.status(404).json({ error: 'Recurso no encontrado.' });
+});
+
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  const status = Number.isInteger(error.status) && error.status >= 400 && error.status < 500
+    ? error.status
+    : 500;
+  console.error('Error no controlado en la API:', error.message);
+  res.status(status).json({
+    error: status < 500 ? 'Solicitud inválida.' : 'Error interno del servidor.'
+  });
+});
+
 function formatDocumentTimestamp(value) {
   if (!value) return 'Fecha no registrada';
   const date = new Date(value);
@@ -583,64 +652,11 @@ function formatDocumentTimestamp(value) {
   });
 }
 
-async function ensureUserProfileSchema() {
-  const [columns] = await pool.query(
-    `SELECT COLUMN_NAME
-     FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'users'
-       AND COLUMN_NAME IN ('full_name', 'email')`
-  );
-  const existingColumns = new Set(columns.map(column => column.COLUMN_NAME));
-  if (!existingColumns.has('full_name')) {
-    await pool.query('ALTER TABLE users ADD COLUMN full_name VARCHAR(255) NULL');
-  }
-  if (!existingColumns.has('email')) {
-    await pool.query('ALTER TABLE users ADD COLUMN email VARCHAR(255) NULL');
-  }
-
-  const [indexes] = await pool.query(
-    `SELECT INDEX_NAME
-     FROM INFORMATION_SCHEMA.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'users'
-       AND COLUMN_NAME = 'email'
-       AND NON_UNIQUE = 0`
-  );
-  if (indexes.length === 0) {
-    await pool.query('CREATE UNIQUE INDEX users_email_unique ON users (email)');
-  }
-
-  const [documentColumns] = await pool.query(
-    `SELECT COLUMN_NAME
-     FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'documents'
-       AND COLUMN_NAME = 'created_by_id'`
-  );
-  if (documentColumns.length === 0) {
-    await pool.query('ALTER TABLE documents ADD COLUMN created_by_id INT NULL');
-  }
-  const [documentIndexes] = await pool.query(
-    `SELECT CONSTRAINT_NAME
-     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'documents'
-       AND CONSTRAINT_TYPE = 'FOREIGN KEY'
-       AND CONSTRAINT_NAME = 'documents_created_by_fk'`
-  );
-  if (documentIndexes.length === 0) {
-    await pool.query(
-      'ALTER TABLE documents ADD CONSTRAINT documents_created_by_fk FOREIGN KEY (created_by_id) REFERENCES users(id) ON DELETE SET NULL'
-    );
-  }
+const PORT = Number(process.env.PORT || 4000);
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+  throw new Error('PORT debe ser un puerto válido.');
 }
-
-const PORT = process.env.PORT || 4000;
-ensureUserProfileSchema()
-  .then(() => server.listen(PORT, () => console.log(`API lista en http://localhost:${PORT}`)))
-  .catch(async error => {
-    console.error('Error al preparar la base de datos de usuarios:', error.message);
-    await pool.end();
-    process.exitCode = 1;
-  });
+const HOST = process.env.HOST || '127.0.0.1';
+server.headersTimeout = 65 * 1000;
+server.requestTimeout = 10 * 60 * 1000;
+server.listen(PORT, HOST, () => console.log(`API lista en ${HOST}:${PORT}`));

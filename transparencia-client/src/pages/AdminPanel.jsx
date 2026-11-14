@@ -585,9 +585,10 @@ export default function AdminPanel() {
             <input
               type="password"
               value={profile.password}
-              minLength="8"
+              minLength="12"
+              maxLength="72"
               onChange={e => setProfile({ ...profile, password: e.target.value })}
-              placeholder="Nueva contraseña (opcional)"
+              placeholder="Nueva contraseña (12 caracteres mínimo)"
               className="text-sm border rounded px-3 py-2 outline-none focus:ring-1 focus:ring-indigo-500"
             />
             <input
@@ -924,6 +925,7 @@ export default function AdminPanel() {
               <input
                 type="file"
                 required
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.avif,.zip,.rar,.7z,.tar,.gz,.bz2,.xz,.tgz"
                 disabled={uploadProgress.active}
                 onChange={e => setDocUpload({ ...docUpload, file: e.target.files[0] })}
                 className="text-sm file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
@@ -1038,6 +1040,7 @@ export default function AdminPanel() {
                           ) : (
                             <input
                               type="file"
+                              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.avif,.zip,.rar,.7z,.tar,.gz,.bz2,.xz,.tgz"
                               required={isExternalDocumentUrl(d.file_path)}
                               onChange={e => setDocumentEdit({ ...documentEdit, file: e.target.files[0] })}
                               className="min-w-48 flex-1 text-xs"
@@ -1147,10 +1150,11 @@ export default function AdminPanel() {
               <input
                 type="password"
                 required
-                minLength="8"
+                minLength="12"
+                maxLength="72"
                 value={newUser.password}
                 onChange={e => setNewUser({ ...newUser, password: e.target.value })}
-                placeholder="Contraseña (mínimo 8 caracteres)"
+                placeholder="Contraseña (12 caracteres mínimo)"
                 className="text-sm border rounded px-3 py-2 outline-none focus:ring-1 focus:ring-violet-500"
               />
               <select
@@ -1185,7 +1189,8 @@ export default function AdminPanel() {
                       />
                       <input
                         type="password"
-                        minLength="8"
+                        minLength="12"
+                        maxLength="72"
                         value={userEdit.password}
                         onChange={e => setUserEdit({ ...userEdit, password: e.target.value })}
                         placeholder="Nueva contraseña (opcional)"

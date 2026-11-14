@@ -1,7 +1,6 @@
 import jwt from 'jsonwebtoken';
-import dotenv from 'dotenv';
 import { pool } from './db.js';
-dotenv.config();
+import { JWT_SECRET } from './securityConfig.js';
 
 export async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
@@ -11,7 +10,7 @@ export async function authenticateToken(req, res, next) {
 
   let payload;
   try {
-    payload = jwt.verify(token, process.env.JWT_SECRET);
+    payload = jwt.verify(token, JWT_SECRET);
   } catch {
     return res.status(401).json({ error: 'Token inválido o expirado' });
   }
