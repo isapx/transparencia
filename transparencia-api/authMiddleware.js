@@ -13,7 +13,7 @@ export async function authenticateToken(req, res, next) {
   try {
     payload = jwt.verify(token, process.env.JWT_SECRET);
   } catch {
-    return res.status(403).json({ error: 'Token inválido o expirado' });
+    return res.status(401).json({ error: 'Token inválido o expirado' });
   }
 
   try {

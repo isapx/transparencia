@@ -108,14 +108,55 @@ export default function AdminPanel() {
 
   useEffect(() => {
     if (!isAdmin) return;
-    fetch(`${API_BASE}/api/users`, { headers })
-      .then(async res => {
-        if (!res.ok) throw new Error('No se pudieron cargar los usuarios.');
-        return res.json();
-      })
-      .then(setUsers)
-      .catch(err => setUserError(err.message));
-  }, [isAdmin, token]);
+    let cancelled = false;
+
+    const loadUsers = async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (cancelled) return;
+
+        let response;
+        try {
+          response = await fetch(`${API_BASE}/api/users`, { headers });
+        } catch {
+          if (attempt < 2) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+            continue;
+          }
+          if (!cancelled) setUserError('No se pudieron cargar los usuarios.');
+          return;
+        }
+
+        if (response.status === 401) {
+          logout();
+          return;
+        }
+        if (!response.ok) {
+          if (response.status >= 500 && attempt < 2) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+            continue;
+          }
+          if (!cancelled) setUserError('No se pudieron cargar los usuarios.');
+          return;
+        }
+
+        try {
+          const users = await response.json();
+          if (!cancelled) {
+            setUsers(users);
+            setUserError('');
+          }
+        } catch {
+          if (!cancelled) setUserError('No se pudieron cargar los usuarios.');
+        }
+        return;
+      }
+    };
+
+    loadUsers();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, token, logout]);
 
   // Carga inicial de Años
   useEffect(() => {
