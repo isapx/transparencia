@@ -1,7 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import dotenv from 'dotenv';
-
-dotenv.config();
+import './env.js';
 
 const configuredSecret = process.env.JWT_SECRET;
 const isValidSecret = typeof configuredSecret === 'string'

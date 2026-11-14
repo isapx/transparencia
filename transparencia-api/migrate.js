@@ -1,8 +1,6 @@
 import mysql from 'mysql2/promise';
-import dotenv from 'dotenv';
 import { migrateSchema } from './schema.js';
-
-dotenv.config();
+import './env.js';
 
 const hasMigrationUser = Boolean(process.env.DB_MIGRATION_USER);
 const hasMigrationPassword = Boolean(process.env.DB_MIGRATION_PASSWORD);

@@ -1,6 +1,5 @@
 import mysql from 'mysql2/promise';
-import dotenv from 'dotenv';
-dotenv.config();
+import './env.js';
 
 const requiredDatabaseSettings = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'];
 const missingSettings = requiredDatabaseSettings.filter(name => !process.env[name]);

@@ -34,7 +34,7 @@ Si Nginx corre dentro de otro contenedor, `127.0.0.1` apunta a ese contenedor, n
 
 ## Variables de entorno
 
-Usa [transparencia-api/.env.example](./transparencia-api/.env.example) como referencia. En producción configura `NODE_ENV=production`, `HOST=127.0.0.1`, `CORS_ORIGINS=https://transparencia.etchojoa.gob.mx`, `TRUST_PROXY_HOPS=1` y los datos de MySQL.
+Usa [transparencia-api/.env.example](./transparencia-api/.env.example) como referencia. La API carga `transparencia-api/.env` aunque PM2 se inicie desde otro directorio; las variables ya definidas en el entorno de PM2 tienen prioridad. En producción configura `NODE_ENV=production`, `HOST=127.0.0.1`, `CORS_ORIGINS=https://transparencia.etchojoa.gob.mx`, `TRUST_PROXY_HOPS=1` y los datos de MySQL.
 
 Genera un `JWT_SECRET` aleatorio de al menos 32 bytes con un gestor de secretos o `openssl rand -base64 48`. No uses el valor de ejemplo ni lo guardes en Git.
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, 
   FileDown, 
@@ -52,6 +52,20 @@ export default function PublicTransparencia() {
   const [selectedFraction, setSelectedFraction] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPeriod, setSelectedPeriod] = useState('Todos');
+  const requestedSelection = useRef(null);
+  const [isRestoringUrl, setIsRestoringUrl] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const selection = {
+      year: params.get('year'),
+      article: params.get('article'),
+      fraction: params.get('fraction')
+    };
+    if (Object.values(selection).some(Boolean)) {
+      requestedSelection.current = selection;
+      return true;
+    }
+    return false;
+  });
 
   // Estado del visor modal
   const [previewDoc, setPreviewDoc] = useState(null);
@@ -70,30 +84,92 @@ export default function PublicTransparencia() {
       .then(r => r.json())
       .then(data => {
         setYears(data);
-        if (data.length > 0) setSelectedYear(data[0]);
+        const selection = requestedSelection.current;
+        const requestedYear = selection?.year
+          ? data.find(year => String(year.year) === selection.year)
+          : null;
+        const yearToSelect = requestedYear || data[0] || null;
+        const canRestoreArticle = Boolean(
+          selection?.article &&
+          yearToSelect &&
+          (!selection.year || requestedYear)
+        );
+        if (!canRestoreArticle) {
+          requestedSelection.current = null;
+        }
+        setSelectedYear(yearToSelect);
+        if (!canRestoreArticle) setIsRestoringUrl(false);
       })
-      .catch(err => console.error("Error cargando años:", err));
+      .catch(err => {
+        requestedSelection.current = null;
+        setIsRestoringUrl(false);
+        console.error('Error cargando años:', err);
+      });
   }, []);
 
   useEffect(() => {
     if (!selectedYear) return;
+    let active = true;
     setSelectedArticle(null);
     setSelectedFraction(null);
+    setArticles([]);
+    setFractions([]);
     setDocuments([]);
     fetch(`${API_BASE}/api/articles/${selectedYear.id}`)
       .then(r => r.json())
-      .then(setArticles)
-      .catch(err => console.error("Error cargando artículos:", err));
+      .then(data => {
+        if (!active) return;
+        setArticles(data);
+        const selection = requestedSelection.current;
+        const requestedArticle = selection?.article
+          ? data.find(article => String(article.number) === selection.article)
+          : null;
+        if (requestedArticle) {
+          setSelectedArticle(requestedArticle);
+        } else {
+          requestedSelection.current = null;
+          setIsRestoringUrl(false);
+        }
+      })
+      .catch(err => {
+        if (!active) return;
+        requestedSelection.current = null;
+        setIsRestoringUrl(false);
+        console.error('Error cargando artículos:', err);
+      });
+    return () => {
+      active = false;
+    };
   }, [selectedYear]);
 
   useEffect(() => {
     if (!selectedArticle) return;
+    let active = true;
     setSelectedFraction(null);
+    setFractions([]);
     setDocuments([]);
     fetch(`${API_BASE}/api/fractions/${selectedArticle.id}`)
       .then(r => r.json())
-      .then(setFractions)
-      .catch(err => console.error("Error cargando fracciones:", err));
+      .then(data => {
+        if (!active) return;
+        setFractions(data);
+        const selection = requestedSelection.current;
+        const requestedFraction = selection?.fraction
+          ? data.find(fraction => String(fraction.code) === selection.fraction)
+          : null;
+        if (requestedFraction) setSelectedFraction(requestedFraction);
+        requestedSelection.current = null;
+        setIsRestoringUrl(false);
+      })
+      .catch(err => {
+        if (!active) return;
+        requestedSelection.current = null;
+        setIsRestoringUrl(false);
+        console.error('Error cargando fracciones:', err);
+      });
+    return () => {
+      active = false;
+    };
   }, [selectedArticle]);
 
   useEffect(() => {
@@ -103,6 +179,20 @@ export default function PublicTransparencia() {
       .then(setDocuments)
       .catch(err => console.error("Error cargando documentos:", err));
   }, [selectedFraction]);
+
+  useEffect(() => {
+    if (!selectedYear || isRestoringUrl) return;
+    const params = new URLSearchParams();
+    params.set('year', String(selectedYear.year));
+    if (selectedArticle) params.set('article', String(selectedArticle.number));
+    if (selectedFraction) params.set('fraction', String(selectedFraction.code));
+    const query = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+    );
+  }, [selectedYear, selectedArticle, selectedFraction, isRestoringUrl]);
 
   const sortedArticles = [...articles].sort((a, b) => 
     a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: 'base' })
@@ -144,7 +234,11 @@ export default function PublicTransparencia() {
             <span className="text-xs font-medium text-slate-200">Ejercicio Fiscal:</span>
             <select
               value={selectedYear?.id || ''}
-              onChange={(e) => setSelectedYear(years.find(y => y.id === parseInt(e.target.value)))}
+              onChange={(e) => {
+                setSelectedYear(years.find(year => year.id === Number(e.target.value)) || null);
+                setSelectedArticle(null);
+                setSelectedFraction(null);
+              }}
               className="bg-slate-800 text-white text-xs font-bold rounded px-2.5 py-1 outline-none border border-slate-700"
             >
               {years.map(y => (
