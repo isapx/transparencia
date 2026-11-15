@@ -19,6 +19,13 @@ function isExternalDocumentUrl(value) {
   return /^https?:\/\//i.test(value || '');
 }
 
+function getDocumentType(value) {
+  if (isExternalDocumentUrl(value)) return 'Enlace';
+  const filePath = (value || '').split(/[?#]/, 1)[0];
+  const extension = filePath.match(/\.([a-z0-9]+)$/i)?.[1];
+  return extension ? extension.toUpperCase() : 'Archivo';
+}
+
 function romanToInt(str) {
   if (!str) return 0;
   const match = str.match(/\b([IVXLCDM]+)\b/i);
@@ -414,6 +421,9 @@ export default function PublicTransparencia() {
                         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-0.5">
                           <span className="font-medium text-slate-700 bg-white border px-1.5 py-0.5 rounded">
                             {doc.period}
+                          </span>
+                          <span className="font-medium text-slate-700 bg-white border px-1.5 py-0.5 rounded">
+                            {getDocumentType(doc.file_path)}
                           </span>
                         </div>
                       </div>
